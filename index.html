@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#0a0a0f" media="(prefers-color-scheme: dark)">
+    <meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Todo++</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+    <!-- Nav -->
+    <nav>
+        <div class="logo">todo<span>++</span></div>
+        <div class="theme-toggle" id="themeToggle" role="button" aria-label="Toggle theme" tabindex="0">
+            <div class="knob"></div>
+        </div>
+    </nav>
+
+    <!-- Hero -->
+    <div class="hero">
+        <h1>Do less.<br>Finish more<span>.</span></h1>
+        <p>A todo app that gets out of your way. No clutter, no noise — just you and your next task.</p>
+    </div>
+
+    <!-- Todo App -->
+    <section class="todo-section" id="todoSection">
+        <div class="section-header">
+            <div class="section-label">Your Tasks</div>
+            <div class="view-toggle" id="viewToggle">
+                <button class="active" data-view="list">List</button>
+                <button data-view="board">Board</button>
+            </div>
+        </div>
+
+        <div class="input-row">
+            <input type="text" id="todoInput" placeholder="What needs to be done?" autofocus>
+            <button id="addBtn">Add</button>
+        </div>
+
+        <!-- List View -->
+        <div id="listView">
+            <div class="filters">
+                <button class="active" data-filter="all">All</button>
+                <button data-filter="active">Active</button>
+                <button data-filter="completed">Completed</button>
+            </div>
+
+            <ul class="todo-list" id="todoList"></ul>
+
+            <div class="status-bar" id="statusBar" style="display:none">
+                <span id="itemCount"></span>
+                <button id="clearCompleted">Clear completed</button>
+            </div>
+        </div>
+
+        <!-- Board View -->
+        <div id="boardView" class="board" style="display:none">
+            <div class="board-column" data-status="backlog">
+                <div class="board-column-header">
+                    <span class="board-column-dot dot-backlog"></span>
+                    <span>Backlog</span>
+                    <span class="board-column-count" id="countBacklog">0</span>
+                </div>
+                <div class="board-column-body" data-status="backlog"></div>
+            </div>
+            <div class="board-column" data-status="in-progress">
+                <div class="board-column-header">
+                    <span class="board-column-dot dot-progress"></span>
+                    <span>In Progress</span>
+                    <span class="board-column-count" id="countProgress">0</span>
+                </div>
+                <div class="board-column-body" data-status="in-progress"></div>
+            </div>
+            <div class="board-column" data-status="done">
+                <div class="board-column-header">
+                    <span class="board-column-dot dot-done"></span>
+                    <span>Done</span>
+                    <span class="board-column-count" id="countDone">0</span>
+                </div>
+                <div class="board-column-body" data-status="done"></div>
+            </div>
+        </div>
+    </section>
+
+    <footer>
+        Todo++ — Less interface, more intent.
+    </footer>
+
+    <script src="app.js"></script>
+</body>
+</html>
