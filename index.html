@@ -33,6 +33,7 @@
             <div class="view-toggle" id="viewToggle">
                 <button class="active" data-view="list">List</button>
                 <button data-view="board">Board</button>
+                <button data-view="focus">Focus</button>
             </div>
         </div>
 
@@ -54,6 +55,7 @@
                 <button class="active" data-filter="all">All</button>
                 <button data-filter="active">Active</button>
                 <button data-filter="completed">Completed</button>
+                <button data-filter="archived">Archived</button>
             </div>
             <div class="filters priority-filters">
                 <button class="active" data-priority="all">Any Priority</button>
@@ -70,6 +72,9 @@
                 <button id="clearCompleted">Clear completed</button>
             </div>
         </div>
+
+        <!-- Focus View -->
+        <div id="focusView" class="focus-view" style="display:none"></div>
 
         <!-- Board View -->
         <div id="boardView" class="board" style="display:none">

@@ -16,6 +16,8 @@ function toDbRow(todo) {
         subtasks: todo.subtasks,
         labels: todo.labels,
         priority: todo.priority,
+        focus_date: todo.focusDate,
+        archived: todo.archived,
     };
 }
 
@@ -30,6 +32,8 @@ function fromDbRow(row) {
         subtasks: row.subtasks || [],
         labels: row.labels || [],
         priority: row.priority || 'low',
+        focusDate: row.focus_date || null,
+        archived: row.archived || false,
     };
 }
 
@@ -65,6 +69,32 @@ async function dbLoadTodos() {
         .order('created_at', { ascending: false });
     if (error) { console.error('Failed to load todos:', error); return []; }
     return data.map(fromDbRow);
+}
+
+function getTodayStr() {
+    const d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+async function dbArchiveSweep() {
+    const cutoff = new Date(Date.now() - 14 * 86400000).toISOString();
+    const { error } = await supabase
+        .from('todos')
+        .update({ archived: true })
+        .eq('done', false)
+        .eq('archived', false)
+        .lt('updated_at', cutoff);
+    if (error) console.error('Archive sweep failed:', error);
+}
+
+async function dbClearStaleFocusDates() {
+    const today = getTodayStr();
+    const { error } = await supabase
+        .from('todos')
+        .update({ focus_date: null })
+        .not('focus_date', 'is', null)
+        .lt('focus_date', today);
+    if (error) console.error('Focus date cleanup failed:', error);
 }
 
 /* ---- THEME TOGGLE ---- */
@@ -437,6 +467,7 @@ const todoInput   = document.getElementById('todoInput');
 const addBtn      = document.getElementById('addBtn');
 const listViewEl  = document.getElementById('listView');
 const boardViewEl = document.getElementById('boardView');
+const focusViewEl = document.getElementById('focusView');
 const list        = document.getElementById('todoList');
 const statusBar   = document.getElementById('statusBar');
 const itemCount   = document.getElementById('itemCount');
@@ -453,17 +484,14 @@ function setView(view) {
 
     viewBtns.forEach(b => b.classList.toggle('active', b.dataset.view === view));
 
-    if (view === 'list') {
-        listViewEl.style.display = '';
-        boardViewEl.style.display = 'none';
-        todoSection.classList.remove('board-active');
-        renderList(true);
-    } else {
-        listViewEl.style.display = 'none';
-        boardViewEl.style.display = '';
-        todoSection.classList.add('board-active');
-        renderBoard();
-    }
+    listViewEl.style.display = view === 'list' ? '' : 'none';
+    boardViewEl.style.display = view === 'board' ? '' : 'none';
+    focusViewEl.style.display = view === 'focus' ? '' : 'none';
+    todoSection.classList.toggle('board-active', view === 'board');
+
+    if (view === 'list') renderList(true);
+    else if (view === 'board') renderBoard();
+    else renderFocus();
 }
 
 viewBtns.forEach(btn => {
@@ -472,7 +500,10 @@ viewBtns.forEach(btn => {
 
 /* ---- LIST VIEW ---- */
 function renderList(skipAnimation) {
+    const isArchivedView = filter === 'archived';
     let filtered = todos.filter(t => {
+        if (isArchivedView) return t.archived;
+        if (t.archived) return false;
         if (filter === 'active')    return !t.done;
         if (filter === 'completed') return t.done;
         return true;
@@ -483,22 +514,25 @@ function renderList(skipAnimation) {
 
     list.innerHTML = '';
 
-    if (todos.length === 0) {
+    const activeTodos = todos.filter(t => !t.archived);
+    if (activeTodos.length === 0 && !isArchivedView) {
         list.innerHTML = '<li class="empty-state">Nothing here yet. Add your first task above.</li>';
         statusBar.style.display = 'none';
         return;
     }
 
     if (filtered.length === 0) {
-        const label = filter === 'active' ? 'active' : 'completed';
+        const label = isArchivedView ? 'archived' : filter === 'active' ? 'active' : filter === 'completed' ? 'completed' : '';
         list.innerHTML = `<li class="empty-state">No ${label} tasks</li>`;
     }
+
+    const todayStr = getTodayStr();
 
     filtered.forEach(todo => {
         const li = document.createElement('li');
         const isExpanded = expandedId === todo.id;
         const isEditing = editingId === todo.id;
-        li.className = 'todo-item' + (todo.done ? ' completed' : '') + (isExpanded ? ' expanded' : '');
+        li.className = 'todo-item' + (todo.done ? ' completed' : '') + (isExpanded ? ' expanded' : '') + (isArchivedView ? ' archived-item' : '');
         if (skipAnimation) li.style.animation = 'none';
 
         const notesIndicator = todo.notes && !isExpanded ? '<span class="notes-indicator"></span>' : '';
@@ -509,6 +543,15 @@ function renderList(skipAnimation) {
             ? `<input class="title-edit" value="${escapeHtml(todo.text)}" data-id="${todo.id}">`
             : `<span class="text">${renderPriorityDot(todo)}${escapeHtml(todo.text)}${notesIndicator}</span>`;
 
+        const isFocused = todo.focusDate === todayStr;
+        const focusBtnHtml = !todo.done && !isArchivedView
+            ? `<button class="focus-btn${isFocused ? ' active' : ''}" data-id="${todo.id}" title="${isFocused ? 'Remove from focus' : 'Focus today'}">🎯</button>`
+            : '';
+
+        const restoreBtnHtml = isArchivedView
+            ? `<button class="restore-btn" data-id="${todo.id}">Restore</button>`
+            : '';
+
         li.innerHTML = `
             <div class="checkbox" data-id="${todo.id}"></div>
             <div class="todo-content" data-id="${todo.id}">
@@ -517,7 +560,9 @@ function renderList(skipAnimation) {
                 ${isExpanded ? renderExpandedPanel(todo) : ''}
             </div>
             ${renderMetaChips(todo)}
+            ${focusBtnHtml}
             <span class="status-badge"><span class="board-column-dot ${dotClass}"></span>${statusLabel}</span>
+            ${restoreBtnHtml}
             <button class="delete-btn" data-id="${todo.id}">&times;</button>
         `;
 
@@ -527,14 +572,37 @@ function renderList(skipAnimation) {
         if (isEditing) wireTitleEdit(li, todo, () => renderList(true));
     });
 
-    const remaining = todos.filter(t => !t.done).length;
+    const remaining = activeTodos.filter(t => !t.done).length;
     itemCount.textContent = `${remaining} item${remaining === 1 ? '' : 's'} left`;
-    clearBtn.style.display = todos.some(t => t.done) ? '' : 'none';
+    clearBtn.style.display = activeTodos.some(t => t.done) ? '' : 'none';
     statusBar.style.display = '';
 }
 
 list.addEventListener('click', e => {
     if (e.target.closest('.expanded-panel') || e.target.closest('.title-edit')) return;
+
+    const focusBtn = e.target.closest('.focus-btn');
+    if (focusBtn) {
+        const id = Number(focusBtn.dataset.id);
+        const todo = todos.find(t => t.id === id);
+        if (!todo) return;
+        const today = getTodayStr();
+        todo.focusDate = todo.focusDate === today ? null : today;
+        dbSaveTodo(todo);
+        renderList(true);
+        return;
+    }
+
+    const restoreBtn = e.target.closest('.restore-btn');
+    if (restoreBtn) {
+        const id = Number(restoreBtn.dataset.id);
+        const todo = todos.find(t => t.id === id);
+        if (!todo) return;
+        todo.archived = false;
+        dbSaveTodo(todo);
+        renderList(true);
+        return;
+    }
 
     const checkbox = e.target.closest('.checkbox');
     const deleteBtn = e.target.closest('.delete-btn');
@@ -644,7 +712,7 @@ let draggedId = null;
 
 function renderBoard() {
     const groups = { backlog: [], 'in-progress': [], done: [] };
-    todos.forEach(t => {
+    todos.filter(t => !t.archived).forEach(t => {
         if (groups[t.status]) groups[t.status].push(t);
         else groups.backlog.push(t);
     });
@@ -683,6 +751,12 @@ function renderBoard() {
                 ? `<span class="card-notes-preview">${escapeHtml(todo.notes.slice(0, 60))}${todo.notes.length > 60 ? '\u2026' : ''}</span>`
                 : '';
 
+            const boardTodayStr = getTodayStr();
+            const boardFocused = todo.focusDate === boardTodayStr;
+            const boardFocusBtn = !todo.done
+                ? `<button class="focus-btn${boardFocused ? ' active' : ''}" data-id="${todo.id}" title="${boardFocused ? 'Remove from focus' : 'Focus today'}">🎯</button>`
+                : '';
+
             card.innerHTML = `
                 <div class="card-body" data-id="${todo.id}">
                     ${titleHtml}
@@ -691,6 +765,7 @@ function renderBoard() {
                     ${notesPreview}
                     ${isExpanded ? renderExpandedPanel(todo) : ''}
                 </div>
+                ${boardFocusBtn}
                 <select class="status-select" data-id="${todo.id}">${statusOptions}</select>
                 <button class="delete-btn" data-id="${todo.id}">&times;</button>
             `;
@@ -755,6 +830,18 @@ columns.forEach(col => {
 boardViewEl.addEventListener('click', e => {
     if (e.target.closest('.expanded-panel') || e.target.closest('.title-edit')) return;
 
+    const boardFocusBtn = e.target.closest('.focus-btn');
+    if (boardFocusBtn) {
+        const id = Number(boardFocusBtn.dataset.id);
+        const todo = todos.find(t => t.id === id);
+        if (!todo) return;
+        const today = getTodayStr();
+        todo.focusDate = todo.focusDate === today ? null : today;
+        dbSaveTodo(todo);
+        renderBoard();
+        return;
+    }
+
     const cardBody = e.target.closest('.card-body');
     if (cardBody) {
         const id = Number(cardBody.dataset.id);
@@ -810,6 +897,111 @@ boardViewEl.addEventListener('change', e => {
     renderBoard();
 });
 
+/* ---- FOCUS VIEW ---- */
+function renderFocus() {
+    const today = getTodayStr();
+    const focusTasks = todos.filter(t =>
+        !t.done && !t.archived && (
+            (t.dueDate && t.dueDate <= today) ||
+            t.focusDate === today
+        )
+    );
+
+    focusViewEl.innerHTML = '';
+
+    if (focusTasks.length === 0) {
+        focusViewEl.innerHTML = `
+            <div class="focus-empty">
+                <p>Nothing to focus on today.</p>
+                <p class="focus-hint">Tasks due today (or overdue), plus any marked with 🎯, will appear here.</p>
+            </div>`;
+        return;
+    }
+
+    const header = `<div class="focus-header"><span class="focus-count">${focusTasks.length} task${focusTasks.length === 1 ? '' : 's'} for today</span></div>`;
+
+    const items = focusTasks.map(todo => {
+        const isExpanded = expandedId === todo.id;
+        const isEditing = editingId === todo.id;
+
+        const titleHtml = isEditing
+            ? `<input class="title-edit" value="${escapeHtml(todo.text)}" data-id="${todo.id}">`
+            : `<span class="text">${renderPriorityDot(todo)}${escapeHtml(todo.text)}</span>`;
+
+        const duePart = todo.dueDate
+            ? `<span class="due-chip${getDueDateState(todo) ? ` due-${getDueDateState(todo)}` : ''}">${formatDueDate(todo.dueDate)}</span>`
+            : '';
+
+        return `
+            <div class="focus-item${isExpanded ? ' expanded' : ''}" data-id="${todo.id}">
+                <div class="checkbox" data-id="${todo.id}"></div>
+                <div class="focus-content" data-id="${todo.id}">
+                    ${titleHtml}
+                    ${isExpanded ? renderExpandedPanel(todo) : ''}
+                </div>
+                ${duePart}
+                <button class="delete-btn" data-id="${todo.id}">&times;</button>
+            </div>`;
+    }).join('');
+
+    focusViewEl.innerHTML = header + items;
+
+    focusTasks.forEach(todo => {
+        const el = focusViewEl.querySelector(`.focus-item[data-id="${todo.id}"]`);
+        if (!el) return;
+        if (expandedId === todo.id) wireExpandedPanel(el, todo, () => renderFocus());
+        if (editingId === todo.id) wireTitleEdit(el, todo, () => renderFocus());
+    });
+}
+
+focusViewEl.addEventListener('click', e => {
+    if (e.target.closest('.expanded-panel') || e.target.closest('.title-edit')) return;
+
+    const checkbox = e.target.closest('.checkbox');
+    const deleteBtn = e.target.closest('.delete-btn');
+    const content = e.target.closest('.focus-content');
+
+    if (content) {
+        const id = Number(content.dataset.id);
+        clearTimeout(expandClickTimer);
+        expandClickTimer = setTimeout(() => {
+            expandClickTimer = null;
+            expandedId = expandedId === id ? null : id;
+            editingId = null;
+            renderFocus();
+        }, 250);
+        return;
+    }
+
+    if (checkbox) {
+        const id = Number(checkbox.dataset.id);
+        const todo = todos.find(t => t.id === id);
+        if (!todo) return;
+        todo.done = true;
+        todo.status = 'done';
+        dbSaveTodo(todo);
+        renderFocus();
+    }
+
+    if (deleteBtn) {
+        const id = Number(deleteBtn.dataset.id);
+        todos = todos.filter(t => t.id !== id);
+        dbDeleteTodo(id);
+        renderFocus();
+    }
+});
+
+focusViewEl.addEventListener('dblclick', e => {
+    const textEl = e.target.closest('.text');
+    if (!textEl) return;
+    clearTimeout(expandClickTimer);
+    expandClickTimer = null;
+    const content = textEl.closest('.focus-content');
+    if (!content) return;
+    editingId = Number(content.dataset.id);
+    renderFocus();
+});
+
 /* ---- ADD TODO ---- */
 async function addTodo() {
     const text = todoInput.value.trim();
@@ -818,13 +1010,14 @@ async function addTodo() {
     todoInput.value = '';
     todoInput.focus();
 
-    const row = { text, done: false, status: 'backlog', notes: '', due_date: null, subtasks: [], labels: [], priority: 'low' };
+    const row = { text, done: false, status: 'backlog', notes: '', due_date: null, subtasks: [], labels: [], priority: 'low', focus_date: null, archived: false };
     const newTodo = await dbInsertTodo(row);
     if (!newTodo) return;
 
     todos.unshift(newTodo);
     if (currentView === 'list') renderList();
-    else renderBoard();
+    else if (currentView === 'board') renderBoard();
+    else renderFocus();
 }
 
 addBtn.addEventListener('click', addTodo);
@@ -838,7 +1031,9 @@ document.getElementById('locationSet')?.addEventListener('click', async () => {
     if (loc) {
         await loadWeather(loc);
         document.getElementById('locationPrompt').style.display = 'none';
-        if (currentView === 'list') renderList(true); else renderBoard();
+        if (currentView === 'list') renderList(true);
+        else if (currentView === 'board') renderBoard();
+        else renderFocus();
     }
 });
 
@@ -852,6 +1047,9 @@ document.getElementById('locationDismiss')?.addEventListener('click', () => {
 
 /* ---- INIT ---- */
 async function init() {
+    await dbArchiveSweep();
+    await dbClearStaleFocusDates();
+
     const [loadedTodos] = await Promise.all([dbLoadTodos(), loadHolidays()]);
     todos = loadedTodos;
     setView(currentView);
@@ -859,7 +1057,9 @@ async function init() {
     const location = await loadLocation();
     if (location) {
         await loadWeather(location);
-        if (currentView === 'list') renderList(true); else renderBoard();
+        if (currentView === 'list') renderList(true);
+        else if (currentView === 'board') renderBoard();
+        else renderFocus();
     } else {
         const prompt = document.getElementById('locationPrompt');
         if (prompt) prompt.style.display = '';
