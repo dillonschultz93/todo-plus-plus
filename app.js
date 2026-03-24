@@ -152,6 +152,99 @@ function formatDueDate(dateStr) {
     return due.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
+/* ---- WEATHER & HOLIDAYS ---- */
+const LOCATION_KEY = 'todopp-location';
+const COUNTRY_KEY = 'todopp-country';
+
+let weatherCache = {};
+let holidayCache = {};
+
+const WMO_ICONS = {
+    0: '☀️', 1: '🌤️', 2: '⛅', 3: '☁️',
+    45: '🌫️', 48: '🌫️',
+    51: '🌦️', 53: '🌦️', 55: '🌧️', 56: '🌧️', 57: '🌧️',
+    61: '🌧️', 63: '🌧️', 65: '🌧️', 66: '🌧️', 67: '🌧️',
+    71: '🌨️', 73: '🌨️', 75: '🌨️', 77: '🌨️',
+    80: '🌦️', 81: '🌦️', 82: '🌧️', 85: '🌨️', 86: '🌨️',
+    95: '⛈️', 96: '⛈️', 99: '⛈️',
+};
+
+function getWeatherIcon(code) { return WMO_ICONS[code] || '🌡️'; }
+function getWeatherForDate(dateStr) { return weatherCache[dateStr] || null; }
+function getHolidayForDate(dateStr) { return holidayCache[dateStr] || null; }
+
+async function loadLocation() {
+    const stored = localStorage.getItem(LOCATION_KEY);
+    if (stored) return JSON.parse(stored);
+
+    return new Promise(resolve => {
+        if (!navigator.geolocation) { resolve(null); return; }
+        navigator.geolocation.getCurrentPosition(
+            pos => {
+                const loc = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+                localStorage.setItem(LOCATION_KEY, JSON.stringify(loc));
+                resolve(loc);
+            },
+            () => resolve(null),
+            { timeout: 5000 }
+        );
+    });
+}
+
+async function searchCity(query) {
+    try {
+        const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=1`);
+        const data = await res.json();
+        if (data.results?.length) {
+            const loc = { lat: data.results[0].latitude, lon: data.results[0].longitude };
+            localStorage.setItem(LOCATION_KEY, JSON.stringify(loc));
+            return loc;
+        }
+    } catch (e) { console.error('City search failed:', e); }
+    return null;
+}
+
+async function loadWeather(loc) {
+    if (!loc) return;
+    try {
+        const res = await fetch(
+            `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}` +
+            `&daily=temperature_2m_max,temperature_2m_min,weathercode&temperature_unit=fahrenheit&timezone=auto&forecast_days=16`
+        );
+        const data = await res.json();
+        if (!data.daily) return;
+        data.daily.time.forEach((date, i) => {
+            weatherCache[date] = {
+                code: data.daily.weathercode[i],
+                hi: Math.round(data.daily.temperature_2m_max[i]),
+            };
+        });
+    } catch (e) { console.error('Weather load failed:', e); }
+}
+
+function detectCountry() {
+    const stored = localStorage.getItem(COUNTRY_KEY);
+    if (stored) return stored;
+    const lang = navigator.language || 'en-US';
+    const parts = lang.split('-');
+    const country = parts.length > 1 ? parts[parts.length - 1].toUpperCase() : 'US';
+    localStorage.setItem(COUNTRY_KEY, country);
+    return country;
+}
+
+async function loadHolidays() {
+    const country = detectCountry();
+    const year = new Date().getFullYear();
+    try {
+        const responses = await Promise.all(
+            [year, year + 1].map(y =>
+                fetch(`https://date.nager.at/api/v3/publicholidays/${y}/${country}`).then(r => r.json())
+            )
+        );
+        responses.flat().forEach(h => { holidayCache[h.date] = h.localName || h.name; });
+    } catch (e) { console.error('Holiday load failed:', e); }
+}
+
 /* ---- SHARED RENDERERS ---- */
 function renderPriorityDot(todo) {
     if (todo.priority === 'low') return '';
@@ -183,7 +276,14 @@ function renderMetaChips(todo) {
     if (todo.dueDate) {
         const state = getDueDateState(todo);
         const cls = state ? ` due-${state}` : '';
-        parts.push(`<span class="due-chip${cls}">${formatDueDate(todo.dueDate)}</span>`);
+        const weather = getWeatherForDate(todo.dueDate);
+        const weatherHtml = weather
+            ? ` <span class="weather-info">${getWeatherIcon(weather.code)} ${weather.hi}°</span>`
+            : '';
+        parts.push(`<span class="due-chip${cls}">${formatDueDate(todo.dueDate)}${weatherHtml}</span>`);
+
+        const holiday = getHolidayForDate(todo.dueDate);
+        if (holiday) parts.push(`<span class="holiday-badge" title="${escapeHtml(holiday)}">🎉 ${escapeHtml(holiday)}</span>`);
     }
     if (todo.subtasks.length) {
         const done = todo.subtasks.filter(s => s.done).length;
@@ -730,10 +830,40 @@ async function addTodo() {
 addBtn.addEventListener('click', addTodo);
 todoInput.addEventListener('keydown', e => { if (e.key === 'Enter') addTodo(); });
 
+/* ---- LOCATION PROMPT ---- */
+document.getElementById('locationSet')?.addEventListener('click', async () => {
+    const q = document.getElementById('locationInput').value.trim();
+    if (!q) return;
+    const loc = await searchCity(q);
+    if (loc) {
+        await loadWeather(loc);
+        document.getElementById('locationPrompt').style.display = 'none';
+        if (currentView === 'list') renderList(true); else renderBoard();
+    }
+});
+
+document.getElementById('locationInput')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.getElementById('locationSet').click();
+});
+
+document.getElementById('locationDismiss')?.addEventListener('click', () => {
+    document.getElementById('locationPrompt').style.display = 'none';
+});
+
 /* ---- INIT ---- */
 async function init() {
-    todos = await dbLoadTodos();
+    const [loadedTodos] = await Promise.all([dbLoadTodos(), loadHolidays()]);
+    todos = loadedTodos;
     setView(currentView);
+
+    const location = await loadLocation();
+    if (location) {
+        await loadWeather(location);
+        if (currentView === 'list') renderList(true); else renderBoard();
+    } else {
+        const prompt = document.getElementById('locationPrompt');
+        if (prompt) prompt.style.display = '';
+    }
 }
 
 init();

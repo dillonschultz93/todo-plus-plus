@@ -482,6 +482,80 @@ section {
     margin-top: -4px;
 }
 
+/* ---- WEATHER & HOLIDAYS ---- */
+.weather-info {
+    font-size: 0.85em;
+    margin-left: 3px;
+    white-space: nowrap;
+}
+
+.holiday-badge {
+    font-size: 0.7rem;
+    font-weight: 500;
+    padding: 2px 7px;
+    border-radius: 20px;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    background: rgba(245, 158, 11, 0.08);
+    color: #f59e0b;
+    white-space: nowrap;
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.location-prompt {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    margin-bottom: 12px;
+    border: 1px dashed var(--border);
+    border-radius: 10px;
+    background: var(--bg-card);
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    flex-wrap: wrap;
+}
+
+.location-prompt input {
+    flex: 1;
+    min-width: 100px;
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-input);
+    color: var(--text);
+    font-size: 16px;
+    font-family: inherit;
+    outline: none;
+}
+
+.location-prompt input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-glow);
+}
+
+.location-prompt button {
+    padding: 6px 12px;
+    border: none;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 0.8rem;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.location-prompt .dismiss-btn {
+    background: none;
+    color: var(--text-tertiary);
+    padding: 4px 6px;
+    font-size: 1rem;
+    line-height: 1;
+}
+
 /* ---- TITLE EDIT ---- */
 .title-edit {
     width: 100%;
