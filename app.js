@@ -1,3 +1,70 @@
+import { createClient } from '@supabase/supabase-js';
+
+/* ---- SUPABASE ---- */
+const supabase = createClient(
+    import.meta.env.VITE_SUPABASE_URL,
+    import.meta.env.VITE_SUPABASE_ANON_KEY
+);
+
+function toDbRow(todo) {
+    return {
+        text: todo.text,
+        done: todo.done,
+        status: todo.status,
+        notes: todo.notes,
+        due_date: todo.dueDate,
+        subtasks: todo.subtasks,
+        labels: todo.labels,
+    };
+}
+
+function fromDbRow(row) {
+    return {
+        id: row.id,
+        text: row.text,
+        done: row.done,
+        status: row.status,
+        notes: row.notes || '',
+        dueDate: row.due_date || null,
+        subtasks: row.subtasks || [],
+        labels: row.labels || [],
+    };
+}
+
+async function dbSaveTodo(todo) {
+    const { error } = await supabase.from('todos').update(toDbRow(todo)).eq('id', todo.id);
+    if (error) console.error('Failed to save todo:', error);
+}
+
+async function dbDeleteTodo(id) {
+    const { error } = await supabase.from('todos').delete().eq('id', id);
+    if (error) console.error('Failed to delete todo:', error);
+}
+
+async function dbDeleteCompleted() {
+    const { error } = await supabase.from('todos').delete().eq('done', true);
+    if (error) console.error('Failed to clear completed:', error);
+}
+
+async function dbInsertTodo(fields) {
+    const { data, error } = await supabase
+        .from('todos')
+        .insert(fields)
+        .select()
+        .single();
+    if (error) { console.error('Failed to add todo:', error); return null; }
+    return fromDbRow(data);
+}
+
+async function dbLoadTodos() {
+    const { data, error } = await supabase
+        .from('todos')
+        .select('*')
+        .order('created_at', { ascending: false });
+    if (error) { console.error('Failed to load todos:', error); return []; }
+    return data.map(fromDbRow);
+}
+
 /* ---- THEME TOGGLE ---- */
 const toggle = document.getElementById('themeToggle');
 const html = document.documentElement;
@@ -16,25 +83,16 @@ toggle.addEventListener('keydown', e => {
 });
 
 /* ---- DATA ---- */
-const STORAGE_KEY = 'todopp-items';
 const VIEW_KEY = 'todopp-view';
 const LABEL_COLORS_KEY = 'todopp-label-colors';
 
-let todos = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-
-todos.forEach(t => {
-    if (!t.status) t.status = t.done ? 'done' : 'backlog';
-    if (t.notes === undefined) t.notes = '';
-    if (t.dueDate === undefined) t.dueDate = null;
-    if (!t.subtasks) t.subtasks = [];
-    if (!t.labels) t.labels = [];
-});
-
+let todos = [];
 let filter = 'all';
 let currentView = localStorage.getItem(VIEW_KEY) || 'list';
 let expandedId = null;
 let editingId = null;
 let expandClickTimer = null;
+let notesSaveTimer = null;
 
 const STATUS_LABELS = {
     'backlog': 'Backlog',
@@ -44,10 +102,6 @@ const STATUS_LABELS = {
 
 const COLOR_PALETTE = ['#8b5cf6', '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#06b6d4', '#f97316'];
 let labelColors = JSON.parse(localStorage.getItem(LABEL_COLORS_KEY) || '{}');
-
-function save() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(todos));
-}
 
 function saveLabelColors() {
     localStorage.setItem(LABEL_COLORS_KEY, JSON.stringify(labelColors));
@@ -162,18 +216,19 @@ function wireExpandedPanel(container, todo, renderFn) {
 
     panel.querySelector('.notes-input')?.addEventListener('input', e => {
         todo.notes = e.target.value;
-        save();
+        clearTimeout(notesSaveTimer);
+        notesSaveTimer = setTimeout(() => dbSaveTodo(todo), 500);
     });
 
     panel.querySelector('.due-input')?.addEventListener('change', e => {
         todo.dueDate = e.target.value || null;
-        save();
+        dbSaveTodo(todo);
         renderFn();
     });
 
     panel.querySelector('.clear-due')?.addEventListener('click', () => {
         todo.dueDate = null;
-        save();
+        dbSaveTodo(todo);
         renderFn();
     });
 
@@ -181,7 +236,7 @@ function wireExpandedPanel(container, todo, renderFn) {
         cb.addEventListener('click', () => {
             const sid = Number(cb.dataset.sid);
             const sub = todo.subtasks.find(s => s.id === sid);
-            if (sub) { sub.done = !sub.done; save(); renderFn(); }
+            if (sub) { sub.done = !sub.done; dbSaveTodo(todo); renderFn(); }
         });
     });
 
@@ -189,7 +244,7 @@ function wireExpandedPanel(container, todo, renderFn) {
         btn.addEventListener('click', () => {
             const sid = Number(btn.dataset.sid);
             todo.subtasks = todo.subtasks.filter(s => s.id !== sid);
-            save();
+            dbSaveTodo(todo);
             renderFn();
         });
     });
@@ -199,7 +254,7 @@ function wireExpandedPanel(container, todo, renderFn) {
         const text = e.target.value.trim();
         if (!text) return;
         todo.subtasks.push({ id: Date.now() + Math.random(), text, done: false });
-        save();
+        dbSaveTodo(todo);
         renderFn();
     });
 
@@ -207,7 +262,7 @@ function wireExpandedPanel(container, todo, renderFn) {
         btn.addEventListener('click', () => {
             const label = btn.dataset.label;
             todo.labels = todo.labels.filter(l => l !== label);
-            save();
+            dbSaveTodo(todo);
             renderFn();
         });
     });
@@ -218,26 +273,26 @@ function wireExpandedPanel(container, todo, renderFn) {
         if (!label || todo.labels.includes(label)) { e.target.value = ''; return; }
         todo.labels.push(label);
         getLabelColor(label);
-        save();
+        dbSaveTodo(todo);
         renderFn();
     });
 }
 
 function wireTitleEdit(container, todo, renderFn) {
-    const input = container.querySelector('.title-edit');
-    if (!input) return;
-    input.focus();
-    input.select();
+    const inp = container.querySelector('.title-edit');
+    if (!inp) return;
+    inp.focus();
+    inp.select();
 
     const commit = () => {
-        const val = input.value.trim();
-        if (val && val !== todo.text) { todo.text = val; save(); }
+        const val = inp.value.trim();
+        if (val && val !== todo.text) { todo.text = val; dbSaveTodo(todo); }
         editingId = null;
         renderFn();
     };
 
-    input.addEventListener('blur', commit);
-    input.addEventListener('keydown', e => {
+    inp.addEventListener('blur', commit);
+    inp.addEventListener('keydown', e => {
         if (e.key === 'Enter') { e.preventDefault(); commit(); }
         if (e.key === 'Escape') { editingId = null; renderFn(); }
     });
@@ -245,7 +300,7 @@ function wireTitleEdit(container, todo, renderFn) {
 
 /* ---- DOM REFS ---- */
 const todoSection = document.getElementById('todoSection');
-const input       = document.getElementById('todoInput');
+const todoInput   = document.getElementById('todoInput');
 const addBtn      = document.getElementById('addBtn');
 const listViewEl  = document.getElementById('listView');
 const boardViewEl = document.getElementById('boardView');
@@ -367,7 +422,7 @@ list.addEventListener('click', e => {
 
         todo.done = !todo.done;
         todo.status = todo.done ? 'done' : 'backlog';
-        save();
+        dbSaveTodo(todo);
 
         if (todo.done) {
             const item = checkbox.closest('.todo-item');
@@ -385,7 +440,7 @@ list.addEventListener('click', e => {
         item.classList.add('gravity-drop');
         item.addEventListener('animationend', () => {
             todos = todos.filter(t => t.id !== id);
-            save();
+            dbDeleteTodo(id);
             renderList();
         }, { once: true });
     }
@@ -416,8 +471,8 @@ clearBtn.addEventListener('click', () => {
     let pending = completed.length;
 
     if (pending === 0) {
+        dbDeleteCompleted();
         todos = todos.filter(t => !t.done);
-        save();
         renderList();
         return;
     }
@@ -428,8 +483,8 @@ clearBtn.addEventListener('click', () => {
             item.addEventListener('animationend', () => {
                 pending--;
                 if (pending === 0) {
+                    dbDeleteCompleted();
                     todos = todos.filter(t => !t.done);
-                    save();
                     renderList();
                 }
             }, { once: true });
@@ -545,7 +600,7 @@ columns.forEach(col => {
 
         todo.status = newStatus;
         todo.done = newStatus === 'done';
-        save();
+        dbSaveTodo(todo);
         renderBoard();
     });
 });
@@ -578,7 +633,7 @@ boardViewEl.addEventListener('click', e => {
 
     setTimeout(() => {
         todos = todos.filter(t => t.id !== id);
-        save();
+        dbDeleteTodo(id);
         renderBoard();
     }, 250);
 });
@@ -605,27 +660,34 @@ boardViewEl.addEventListener('change', e => {
 
     todo.status = newStatus;
     todo.done = newStatus === 'done';
-    save();
+    dbSaveTodo(todo);
     renderBoard();
 });
 
 /* ---- ADD TODO ---- */
-function addTodo() {
-    const text = input.value.trim();
+async function addTodo() {
+    const text = todoInput.value.trim();
     if (!text) return;
 
-    todos.unshift({ id: Date.now(), text, done: false, status: 'backlog', notes: '', dueDate: null, subtasks: [], labels: [] });
-    input.value = '';
-    save();
+    todoInput.value = '';
+    todoInput.focus();
 
+    const row = { text, done: false, status: 'backlog', notes: '', due_date: null, subtasks: [], labels: [] };
+    const newTodo = await dbInsertTodo(row);
+    if (!newTodo) return;
+
+    todos.unshift(newTodo);
     if (currentView === 'list') renderList();
     else renderBoard();
-
-    input.focus();
 }
 
 addBtn.addEventListener('click', addTodo);
-input.addEventListener('keydown', e => { if (e.key === 'Enter') addTodo(); });
+todoInput.addEventListener('keydown', e => { if (e.key === 'Enter') addTodo(); });
 
 /* ---- INIT ---- */
-setView(currentView);
+async function init() {
+    todos = await dbLoadTodos();
+    setView(currentView);
+}
+
+init();
