@@ -4,7 +4,7 @@
   "private": true,
   "description": "A minimal, physics-driven todo app built for deep focus.",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host",
     "build": "vite build",
     "preview": "vite preview"
   },

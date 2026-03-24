@@ -43,10 +43,17 @@
 
         <!-- List View -->
         <div id="listView">
-            <div class="filters">
+            <div class="filters status-filters">
                 <button class="active" data-filter="all">All</button>
                 <button data-filter="active">Active</button>
                 <button data-filter="completed">Completed</button>
+            </div>
+            <div class="filters priority-filters">
+                <button class="active" data-priority="all">Any Priority</button>
+                <button data-priority="urgent">Urgent</button>
+                <button data-priority="high">High</button>
+                <button data-priority="medium">Medium</button>
+                <button data-priority="low">Low</button>
             </div>
 
             <ul class="todo-list" id="todoList"></ul>

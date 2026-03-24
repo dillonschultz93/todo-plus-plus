@@ -15,6 +15,7 @@ function toDbRow(todo) {
         due_date: todo.dueDate,
         subtasks: todo.subtasks,
         labels: todo.labels,
+        priority: todo.priority,
     };
 }
 
@@ -28,6 +29,7 @@ function fromDbRow(row) {
         dueDate: row.due_date || null,
         subtasks: row.subtasks || [],
         labels: row.labels || [],
+        priority: row.priority || 'low',
     };
 }
 
@@ -88,11 +90,16 @@ const LABEL_COLORS_KEY = 'todopp-label-colors';
 
 let todos = [];
 let filter = 'all';
+let priorityFilter = 'all';
 let currentView = localStorage.getItem(VIEW_KEY) || 'list';
 let expandedId = null;
 let editingId = null;
 let expandClickTimer = null;
 let notesSaveTimer = null;
+
+const PRIORITY_LEVELS = ['urgent', 'high', 'medium', 'low'];
+const PRIORITY_LABELS = { urgent: 'U', high: 'H', medium: 'M', low: 'L' };
+const PRIORITY_COLORS = { urgent: '#ef4444', high: '#f59e0b', medium: '#3b82f6', low: 'var(--text-tertiary)' };
 
 const STATUS_LABELS = {
     'backlog': 'Backlog',
@@ -146,6 +153,23 @@ function formatDueDate(dateStr) {
 }
 
 /* ---- SHARED RENDERERS ---- */
+function renderPriorityDot(todo) {
+    if (todo.priority === 'low') return '';
+    return `<span class="priority-dot" style="--priority-color:${PRIORITY_COLORS[todo.priority]}" title="${todo.priority}"></span>`;
+}
+
+function renderPrioritySelector(todo) {
+    const btns = PRIORITY_LEVELS.map(p =>
+        `<button class="priority-btn${todo.priority === p ? ' active' : ''}" data-id="${todo.id}" data-priority="${p}" style="--priority-color:${PRIORITY_COLORS[p]}">${PRIORITY_LABELS[p]}</button>`
+    ).join('');
+    return `
+        <div class="panel-field">
+            <label class="panel-label">Priority</label>
+            <div class="priority-selector">${btns}</div>
+        </div>
+    `;
+}
+
 function renderLabelsRow(todo) {
     if (!todo.labels.length) return '';
     const chips = todo.labels.map(l =>
@@ -186,6 +210,7 @@ function renderExpandedPanel(todo) {
 
     return `
         <div class="expanded-panel">
+            ${renderPrioritySelector(todo)}
             <div class="panel-field">
                 <label class="panel-label">Due date</label>
                 <div class="due-row">
@@ -213,6 +238,14 @@ function renderExpandedPanel(todo) {
 function wireExpandedPanel(container, todo, renderFn) {
     const panel = container.querySelector('.expanded-panel');
     if (!panel) return;
+
+    panel.querySelectorAll('.priority-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            todo.priority = btn.dataset.priority;
+            dbSaveTodo(todo);
+            renderFn();
+        });
+    });
 
     panel.querySelector('.notes-input')?.addEventListener('input', e => {
         todo.notes = e.target.value;
@@ -308,7 +341,8 @@ const list        = document.getElementById('todoList');
 const statusBar   = document.getElementById('statusBar');
 const itemCount   = document.getElementById('itemCount');
 const clearBtn    = document.getElementById('clearCompleted');
-const filterBtns  = document.querySelectorAll('.filters button');
+const filterBtns  = document.querySelectorAll('.status-filters button');
+const priorityBtns = document.querySelectorAll('.priority-filters button');
 const viewBtns    = document.querySelectorAll('#viewToggle button');
 
 /* ---- VIEW SWITCHING ---- */
@@ -338,11 +372,14 @@ viewBtns.forEach(btn => {
 
 /* ---- LIST VIEW ---- */
 function renderList(skipAnimation) {
-    const filtered = todos.filter(t => {
+    let filtered = todos.filter(t => {
         if (filter === 'active')    return !t.done;
         if (filter === 'completed') return t.done;
         return true;
     });
+    if (priorityFilter !== 'all') {
+        filtered = filtered.filter(t => t.priority === priorityFilter);
+    }
 
     list.innerHTML = '';
 
@@ -370,7 +407,7 @@ function renderList(skipAnimation) {
 
         const titleHtml = isEditing
             ? `<input class="title-edit" value="${escapeHtml(todo.text)}" data-id="${todo.id}">`
-            : `<span class="text">${escapeHtml(todo.text)}${notesIndicator}</span>`;
+            : `<span class="text">${renderPriorityDot(todo)}${escapeHtml(todo.text)}${notesIndicator}</span>`;
 
         li.innerHTML = `
             <div class="checkbox" data-id="${todo.id}"></div>
@@ -466,6 +503,15 @@ filterBtns.forEach(btn => {
     });
 });
 
+priorityBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+        priorityBtns.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        priorityFilter = btn.dataset.priority;
+        renderList(true);
+    });
+});
+
 clearBtn.addEventListener('click', () => {
     const completed = list.querySelectorAll('.todo-item.completed');
     let pending = completed.length;
@@ -531,7 +577,7 @@ function renderBoard() {
 
             const titleHtml = isEditing
                 ? `<input class="title-edit" value="${escapeHtml(todo.text)}" data-id="${todo.id}">`
-                : `<span class="card-text">${escapeHtml(todo.text)}</span>`;
+                : `<span class="card-text">${renderPriorityDot(todo)}${escapeHtml(todo.text)}</span>`;
 
             const notesPreview = !isExpanded && todo.notes
                 ? `<span class="card-notes-preview">${escapeHtml(todo.notes.slice(0, 60))}${todo.notes.length > 60 ? '\u2026' : ''}</span>`
@@ -672,7 +718,7 @@ async function addTodo() {
     todoInput.value = '';
     todoInput.focus();
 
-    const row = { text, done: false, status: 'backlog', notes: '', due_date: null, subtasks: [], labels: [] };
+    const row = { text, done: false, status: 'backlog', notes: '', due_date: null, subtasks: [], labels: [], priority: 'low' };
     const newTodo = await dbInsertTodo(row);
     if (!newTodo) return;
 
