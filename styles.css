@@ -187,29 +187,6 @@ section {
     margin-bottom: 12px;
 }
 
-.section-title {
-    font-size: 1.4rem;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-    margin-bottom: 8px;
-}
-
-.section-desc {
-    font-size: 0.92rem;
-    color: var(--text-secondary);
-    line-height: 1.6;
-    margin-bottom: 24px;
-    max-width: 500px;
-}
-
-.divider {
-    max-width: 720px;
-    margin: 48px auto;
-    padding: 0 16px;
-    height: 1px;
-    background: var(--section-divider);
-}
-
 /* ---- TODO APP ---- */
 .todo-section { margin-bottom: 0; transition: max-width 0.4s ease; }
 .todo-section.board-active { max-width: 960px; }
@@ -1285,7 +1262,6 @@ footer {
     .hero p { font-size: 1.1rem; }
 
     section { padding: 0 24px; }
-    .divider { padding: 0 24px; margin: 64px auto; }
 
     .input-row { gap: 10px; }
     .input-row input { padding: 14px 18px; font-size: 0.95rem; }

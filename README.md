@@ -4,7 +4,9 @@ A full-featured task management app with a kanban board, priority system, and Su
 
 ## Features
 
-- **List + Kanban board** — toggle between a filtered list and a drag-and-drop board with Backlog, In Progress, and Done columns
+- **List + Kanban + Focus** — three views: a filtered list, a drag-and-drop board, and a minimal Focus view showing only today's tasks
+- **Focus Mode** — shows tasks due today, overdue tasks, and anything manually pinned with the target button; auto-clears stale focus pins on load
+- **Auto-Archive** — tasks untouched for 14 days are automatically archived on load, keeping active views clean without deleting data; archived tasks can be restored from the Archived filter
 - **Priority levels** — Urgent, High, Medium, Low with color-coded dots and a filterable priority bar
 - **Due dates** — date picker with color-coded chips (overdue, today, upcoming)
 - **Subtasks** — checklist inside each task with a progress indicator
@@ -65,7 +67,11 @@ The app expects a `todos` table in your Supabase project. If you're starting fre
 ```
 ├── index.html        ← Entry point and app layout
 ├── styles.css        ← All styles, theme variables, animations
-├── app.js            ← App logic, Supabase client, renderers
+├── app.js            ← State, views, event handlers, init
+├── db.js             ← Supabase client, CRUD, archive sweep
+├── weather.js        ← Weather, holiday, and geolocation APIs
+├── theme.js          ← Dark/light theme toggle
+├── renderers.js      ← Shared rendering functions and utilities
 ├── .env              ← Supabase credentials (not committed)
 ├── package.json
 └── README.md
